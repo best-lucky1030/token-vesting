@@ -1,7 +1,10 @@
+#![cfg(feature = "test-bpf")]
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     msg,
     pubkey::Pubkey,
+    rent::Rent,
+    system_program,
 };
 use solana_program_test::{processor, ProgramTest};
 use solana_sdk::{account::Account, signature::Signer, transaction::Transaction};
@@ -12,22 +15,17 @@ use token_vesting::instruction::VestingInstruction;
 async fn test_token_vesting() {
     // TODO create key pair for signing
     let program_id = Pubkey::new_unique();
-    let source_pubkey = Pubkey::new_unique();
     let destination_pubkey = Pubkey::new_unique();
+    let mut seeds = [42u8; 32];
+
+    let (transaction_pubkey, bump) = Pubkey::find_program_address(&[&seeds[..31]], &program_id);
+    seeds[31] = bump;
 
     let mut program_test =
         ProgramTest::new("token_vesting", program_id, processor!(process_instruction));
+
     // program_test.add_program("token_vesting", program_id, None);
 
-    let source_account = Account {
-        lamports: 5,
-        owner: program_id, // Can only withdraw lamports from accounts owned by the program
-        ..Account::default()
-    };
-
-    // msg!("Account : {:?}", &source_account);
-
-    program_test.add_account(source_pubkey, source_account);
     program_test.add_account(
         destination_pubkey,
         Account {
@@ -36,27 +34,59 @@ async fn test_token_vesting() {
         },
     );
 
-    let instruction_data = VestingInstruction::Lock {
+    program_test.add_account(
+        transaction_pubkey,
+        Account {
+            lamports: Rent::default().minimum_balance(40),
+            ..Account::default()
+        },
+    );
+
+    let init_instruction_data = VestingInstruction::Init {
+        seeds: seeds.clone(),
         amount: 5,
         release_height: 0,
+        mint_address: Pubkey::new_unique(),
     }
     .pack();
-    msg!("Packed instruction data: {:?}", instruction_data);
 
-    let accounts = vec![
-        AccountMeta::new(source_pubkey, false),
-        AccountMeta::new(destination_pubkey, false),
-    ];
-
-    let instruction = Instruction {
-        program_id: program_id,
-        accounts: accounts,
-        data: instruction_data,
-    };
+    let lock_instruction_data = VestingInstruction::Lock {
+        seeds: seeds.clone(),
+        amount: 5,
+        release_height: 0,
+        mint_address: Pubkey::new_unique(),
+    }
+    .pack();
+    msg!("Packed instruction data: {:?}", lock_instruction_data);
 
     let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
 
-    let mut transaction = Transaction::new_with_payer(&[instruction], Some(&payer.pubkey()));
+    let lock_accounts = vec![
+        AccountMeta::new(program_id, false),
+        AccountMeta::new(system_program::id(), false),
+        AccountMeta::new(transaction_pubkey, false),
+        AccountMeta::new(payer.pubkey(), true),
+        AccountMeta::new(destination_pubkey, false),
+    ];
+
+    let init_accounts = vec![
+        AccountMeta::new(program_id, false),
+        AccountMeta::new(system_program::id(), false),
+        AccountMeta::new(transaction_pubkey, false),
+        AccountMeta::new(payer.pubkey(), true),
+        AccountMeta::new(destination_pubkey, false),
+    ];
+
+    let instructions = [
+        Instruction {
+            program_id: program_id,
+            accounts: init_accounts,
+            data: init_instruction_data,
+        },
+        // Instruction { program_id: program_id, accounts: lock_accounts, data: lock_instruction_data }
+    ];
+
+    let mut transaction = Transaction::new_with_payer(&instructions, Some(&payer.pubkey()));
     transaction.sign(&[&payer], recent_blockhash);
 
     banks_client.process_transaction(transaction).await.unwrap();
