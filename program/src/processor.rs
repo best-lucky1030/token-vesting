@@ -48,21 +48,21 @@ impl Processor {
         //     return Err(ProgramError::InvalidArgument)
         // }
 
-        let program_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
+        let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
 
-        if program_account_key != *vesting_account.key {
+        if vesting_account_key != *vesting_account.key {
             return Err(ProgramError::InvalidArgument);
         }
 
         // We might be able to do this with one invocation of allocate_with_seed
         invoke_signed(
-            &allocate(&program_account_key, SIZE as u64),
+            &allocate(&vesting_account_key, SIZE as u64),
             &[system_account.clone(), vesting_account.clone()],
             &[&[&seeds]],
         )?;
 
         invoke_signed(
-            &assign(&program_account_key, program_id),
+            &assign(&vesting_account_key, program_id),
             &[system_account.clone(), vesting_account.clone()],
             &[&[&seeds]],
         )?;

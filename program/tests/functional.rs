@@ -14,7 +14,6 @@ use token_vesting::instruction::VestingInstruction;
 async fn test_token_vesting() {
     // TODO create key pair for signing
     let program_id = Pubkey::new_unique();
-    let source_pubkey = Pubkey::new_unique();
     let destination_pubkey = Pubkey::new_unique();
     let mut seeds = [42u8; 32];
 
@@ -25,16 +24,6 @@ async fn test_token_vesting() {
         ProgramTest::new("token_vesting", program_id, processor!(process_instruction));
 
     // program_test.add_program("token_vesting", program_id, None);
-
-    let source_account = Account {
-        lamports: 5,
-        owner: program_id, // Can only withdraw lamports from accounts owned by the program
-        ..Account::default()
-    };
-
-    // msg!("Account : {:?}", &source_account);
-
-    program_test.add_account(source_pubkey, source_account);
 
     program_test.add_account(
         destination_pubkey,
