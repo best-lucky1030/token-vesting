@@ -1,3 +1,4 @@
+#![cfg(feature = "test-bpf")]
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     msg,
