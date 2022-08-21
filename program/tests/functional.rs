@@ -50,22 +50,18 @@ async fn test_token_vesting() {
     }
     .pack();
 
-    let lock_instruction_data = VestingInstruction::Lock {
+    let unlock_instruction_data = VestingInstruction::Unlock {
         seeds: seeds.clone(),
-        amount: 5,
-        release_height: 0,
-        mint_address: Pubkey::new_unique(),
     }
     .pack();
-    msg!("Packed instruction data: {:?}", lock_instruction_data);
+    // msg!("Packed instruction data: {:?}", lock_instruction_data);
 
     let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
 
-    let lock_accounts = vec![
+    let unlock_accounts = vec![
         AccountMeta::new(program_id, false),
         AccountMeta::new(system_program::id(), false),
         AccountMeta::new(transaction_pubkey, false),
-        AccountMeta::new(payer.pubkey(), true),
         AccountMeta::new(destination_pubkey, false),
     ];
 
@@ -83,7 +79,11 @@ async fn test_token_vesting() {
             accounts: init_accounts,
             data: init_instruction_data,
         },
-        // Instruction { program_id: program_id, accounts: lock_accounts, data: lock_instruction_data }
+        Instruction {
+            program_id: program_id,
+            accounts: unlock_accounts,
+            data: unlock_instruction_data,
+        },
     ];
 
     let mut transaction = Transaction::new_with_payer(&instructions, Some(&payer.pubkey()));

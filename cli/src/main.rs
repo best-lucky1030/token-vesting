@@ -242,7 +242,7 @@ fn main() {
     msg!("RPC URL: {:?}", &rpc_url);
     let rpc_client = RpcClient::new(rpc_url);
 
-    let program_id = pubkey_of(matches, "program_id").unwrap();
+    let program_id = pubkey_of(&matches, "program_id").unwrap();
     // solana_logger::setup_with_default("solana=info");
     let _ = match matches.subcommand() {
         ("create-svc", Some(arg_matches)) => {
