@@ -8,14 +8,14 @@ use solana_program::{
     program_error::PrintProgramError,
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction::{allocate, assign, transfer},
-    system_program,
+    system_instruction::{allocate, assign},
     sysvar::{clock::Clock, Sysvar},
 };
-
+use spl_token::instruction::transfer;
 use spl_token::instruction::TokenInstruction;
 
 use num_traits::FromPrimitive;
+use spl_associated_token_account::get_associated_token_address;
 
 use crate::{
     error::VestingError,
@@ -151,18 +151,20 @@ impl Processor {
             vesting_account.try_borrow_mut_data()?[i] = packed_state[i];
         }
 
-        invoke_signed(
-            &transfer(source_account.key, &vesting_account_key, amount),
-            &[
-                system_account.clone(),
-                source_account.clone(),
-                vesting_account.clone(),
-            ],
-            &[],
+        let vesting_spl_address = get_associated_token_address(vesting_account.key, &mint_address);
+        let source_spl_account = get_associated_token_address(source_account.key, &mint_address);
+
+        let instruction = transfer(
+            &spl_token::id(),
+            &source_spl_account,
+            &vesting_spl_address,
+            &mint_address,
+            &[source_account.key],
+            amount,
         )?;
 
         // invoke_signed(
-        //     TokenInstruction::Transfer(),
+        //     &transfer(source_account.key, &vesting_account_key, amount),
         //     &[
         //         system_account.clone(),
         //         source_account.clone(),
@@ -180,11 +182,13 @@ impl Processor {
     ) -> ProgramResult {
         let accounts_iter = &mut _accounts.iter();
         let _program_account = next_account_info(accounts_iter)?;
+        let system_account = next_account_info(accounts_iter)?;
         let vesting_account = next_account_info(accounts_iter)?;
         let receiver_account = next_account_info(accounts_iter)?;
 
         let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
         if vesting_account_key != *vesting_account.key {
+            msg!("Invalid vesting account key");
             return Err(ProgramError::InvalidArgument);
         }
 
@@ -192,16 +196,28 @@ impl Processor {
         let state = VestingState::unpack(packed_state.as_ref())?;
 
         if state.destination_address != *receiver_account.key {
+            msg!("Contract destination account does not matched provided account");
             return Err(ProgramError::InvalidArgument);
         }
 
-        let clock = &Clock::from_account_info(vesting_account)?;
+        // let clock = &Clock::from_account_info(vesting_account)?;
 
-        if clock.slot > state.release_height {
-            **receiver_account.try_borrow_mut_lamports()? +=
-                **vesting_account.try_borrow_lamports()?;
-            **vesting_account.try_borrow_mut_lamports()? = 0;
-        }
+        let amount = **vesting_account.try_borrow_lamports()?;
+
+        invoke_signed(
+            &transfer(vesting_account.key, receiver_account.key, amount)?,
+            &[
+                system_account.clone(),
+                vesting_account.clone(),
+                receiver_account.clone(),
+            ],
+            &[&[&seeds]],
+        )?;
+
+        // if clock.slot > state.release_height {
+        //     **receiver_account.try_borrow_mut_lamports()? += **vesting_account.try_borrow_lamports()?;
+        //     **vesting_account.try_borrow_mut_lamports()? = 0;
+        // }
         Ok(())
     }
 
