@@ -1,45 +1,39 @@
 use solana_program::{
-    account_info::{AccountInfo, next_account_info}, 
-    decode_error::DecodeError, entrypoint::ProgramResult, 
-    instruction::{AccountMeta, Instruction}, 
-    msg, program::{invoke, invoke_signed}, 
-    program_error::ProgramError, 
-    program_error::{PrintProgramError}, 
-    pubkey::Pubkey, 
+    account_info::{next_account_info, AccountInfo},
+    decode_error::DecodeError,
+    entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
+    msg,
+    program::{invoke, invoke_signed},
+    program_error::PrintProgramError,
+    program_error::ProgramError,
+    pubkey::Pubkey,
     system_instruction::{allocate, assign},
-    sysvar::{Sysvar, clock::Clock}
+    sysvar::{clock::Clock, Sysvar},
 };
-
 use spl_token::instruction::transfer;
-
-use spl_associated_token_account::get_associated_token_address;
+use spl_token::instruction::TokenInstruction;
 
 use num_traits::FromPrimitive;
+use spl_associated_token_account::get_associated_token_address;
 
 use crate::{
-    error::VestingError, 
-    instruction::{self, VestingInstruction}, 
-    state::{VestingState, STATE_SIZE}
+    error::VestingError,
+    instruction::{self, VestingInstruction},
+    state::{VestingState, STATE_SIZE},
 };
-
-// fn get_associated_token_address(account: &Pubkey, mint: &Pubkey) -> Result<Pubkey, ProgramError> {
-//     Ok(Pubkey::create_program_address(
-//         &[&account.to_bytes(), &spl_token::id().to_bytes(), &mint.to_bytes()], &spl_token::id()
-//     )?)
-// }
 
 pub struct Processor {}
 
 impl Processor {
-
     pub fn process_init(
-        program_id: &Pubkey, 
-        accounts: &[AccountInfo], 
-        seeds: [u8; 32], 
-        amount: u64, 
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        seeds: [u8; 32],
+        amount: u64,
         release_height: u64,
-        mint_address: Pubkey
-    ) -> ProgramResult {        
+        mint_address: Pubkey,
+    ) -> ProgramResult {
         let accounts_iter = &mut accounts.iter();
 
         let _program_account = next_account_info(accounts_iter)?;
@@ -55,75 +49,66 @@ impl Processor {
         //     return Err(ProgramError::InvalidArgument)
         // }
 
-        
         // if system_account.is_writable {
         //     msg!("System account is writable!");
         //     return Err(ProgramError::InvalidArgument)
         // }
 
-
         // if *system_account.key != system_program::id(){
         //     return Err(ProgramError::InvalidArgument)
         // }
 
-
         let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
 
         if vesting_account_key != *vesting_account.key {
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
-
-        
 
         // We might be able to do this with one invocation of allocate_with_seed
         invoke_signed(
             &allocate(&vesting_account_key, STATE_SIZE as u64),
-            &[
-                system_account.clone(),
-                vesting_account.clone(),
-            ],
-            &[&[&seeds]]
+            &[system_account.clone(), vesting_account.clone()],
+            &[&[&seeds]],
         )?;
 
         invoke_signed(
             &assign(&vesting_account_key, program_id),
-            &[
-                system_account.clone(),
-                vesting_account.clone()
-            ],
-            &[&[&seeds]]
+            &[system_account.clone(), vesting_account.clone()],
+            &[&[&seeds]],
         )?;
 
-        let mut instruction_accounts:Vec<AccountMeta> = accounts
+        let mut instruction_accounts: Vec<AccountMeta> = accounts
             .iter()
             .map(|a| AccountMeta::new(a.key.clone(), a.is_signer))
             .collect();
         instruction_accounts[2] = AccountMeta::new(vesting_account.key.clone(), true);
 
+        let data = VestingInstruction::Lock {
+            seeds,
+            release_height,
+            amount,
+            mint_address,
+        }
+        .pack();
 
-        let data = VestingInstruction::Lock { seeds, release_height, amount, mint_address }.pack();
+        let instruction = Instruction {
+            program_id: program_id.clone(),
+            accounts: instruction_accounts,
+            data,
+        };
 
-        let instruction = Instruction { program_id: program_id.clone(), accounts:instruction_accounts, data };
-
-        invoke_signed(
-            &instruction,
-            accounts,
-            &[&[&seeds]]
-        )?;
-
-
+        invoke_signed(&instruction, accounts, &[&[&seeds]])?;
 
         Ok(())
-
     }
 
     pub fn process_lock(
-        program_id: &Pubkey, 
-        accounts: &[AccountInfo], 
-        seeds: [u8; 32], 
-        amount: u64, 
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        seeds: [u8; 32],
+        amount: u64,
         release_height: u64,
-        mint_address: Pubkey
+        mint_address: Pubkey,
     ) -> ProgramResult {
         let accounts_iter = &mut accounts.iter();
 
@@ -135,28 +120,28 @@ impl Processor {
 
         if !vesting_account.is_signer {
             msg!("This instruction is private");
-            return Err(ProgramError::MissingRequiredSignature)
+            return Err(ProgramError::MissingRequiredSignature);
         }
 
         let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
         if vesting_account_key != *vesting_account.key {
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
 
         if !source_account.is_signer {
             msg!("Source account should be a signer.");
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
 
-        if *vesting_account.owner != *program_id{
+        if *vesting_account.owner != *program_id {
             msg!("Program doesn't own vesting account");
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
 
-        let state = VestingState { 
-            destination_address: destination_account.key.clone(), 
-            release_height, 
-            mint_address: mint_address.clone() 
+        let state = VestingState {
+            destination_address: destination_account.key.clone(),
+            release_height,
+            mint_address: mint_address.clone(),
         };
 
         // TODO: Rework this
@@ -175,7 +160,7 @@ impl Processor {
             &vesting_spl_address,
             &mint_address,
             &[source_account.key],
-            amount
+            amount,
         )?;
 
         // invoke_signed(
@@ -187,21 +172,15 @@ impl Processor {
         //     ],
         //     &[]
         // )?;
-
-        invoke(
-            &instruction,
-            &[
-                source_account.clone(),
-                destination_account.clone(),
-                vesting_account.clone()
-            ]
-        )?;
-            Ok(())
+        Ok(())
     }
 
-    pub fn process_unlock(program_id: &Pubkey, _accounts: &[AccountInfo], seeds: [u8; 32], ) -> ProgramResult {
+    pub fn process_unlock(
+        program_id: &Pubkey,
+        _accounts: &[AccountInfo],
+        seeds: [u8; 32],
+    ) -> ProgramResult {
         let accounts_iter = &mut _accounts.iter();
-        
         let _program_account = next_account_info(accounts_iter)?;
         let system_account = next_account_info(accounts_iter)?;
         let vesting_account = next_account_info(accounts_iter)?;
@@ -210,7 +189,7 @@ impl Processor {
         let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
         if vesting_account_key != *vesting_account.key {
             msg!("Invalid vesting account key");
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
 
         let packed_state = vesting_account.try_borrow_data()?;
@@ -218,53 +197,75 @@ impl Processor {
 
         if state.destination_address != *receiver_account.key {
             msg!("Contract destination account does not matched provided account");
-            return Err(ProgramError::InvalidArgument)
+            return Err(ProgramError::InvalidArgument);
         }
 
         // let clock = &Clock::from_account_info(vesting_account)?;
 
-        let amount= **vesting_account.try_borrow_lamports()?;
-
+        let amount = **vesting_account.try_borrow_lamports()?;
 
         invoke_signed(
-            &transfer(vesting_account.key, receiver_account.key, amount),
+            &transfer(vesting_account.key, receiver_account.key, amount)?,
             &[
                 system_account.clone(),
                 vesting_account.clone(),
-                receiver_account.clone()
+                receiver_account.clone(),
             ],
-            &[&[&seeds]]
+            &[&[&seeds]],
         )?;
 
-<<<<<<< HEAD
-        if clock.slot > state.release_height {
-            **receiver_account.try_borrow_mut_lamports()? += **vesting_account.try_borrow_lamports()?;
-            **vesting_account.try_borrow_mut_lamports()? = 0;
-        }
-        
-=======
->>>>>>> 8e61493 (F)
+        // if clock.slot > state.release_height {
+        //     **receiver_account.try_borrow_mut_lamports()? += **vesting_account.try_borrow_lamports()?;
+        //     **vesting_account.try_borrow_mut_lamports()? = 0;
+        // }
         Ok(())
     }
 
-    pub fn process_instruction(program_id: &Pubkey, accounts: &[AccountInfo], instruction_data: &[u8]) -> ProgramResult {
+    pub fn process_instruction(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+        instruction_data: &[u8],
+    ) -> ProgramResult {
         msg!("Beginning processing");
         let instruction = VestingInstruction::unpack(instruction_data)?;
         msg!("Instruction unpacked");
         match instruction {
-            VestingInstruction::Init { seeds, amount, release_height, mint_address} => {
+            VestingInstruction::Init {
+                seeds,
+                amount,
+                release_height,
+                mint_address,
+            } => {
                 msg!("Instruction: Init");
-                Self::process_init(program_id, accounts, seeds, amount, release_height, mint_address)
+                Self::process_init(
+                    program_id,
+                    accounts,
+                    seeds,
+                    amount,
+                    release_height,
+                    mint_address,
+                )
             }
-            VestingInstruction::Lock { seeds, amount, release_height, mint_address} => {
+            VestingInstruction::Lock {
+                seeds,
+                amount,
+                release_height,
+                mint_address,
+            } => {
                 msg!("Instruction: Lock");
-                Self::process_lock(program_id, accounts, seeds, amount, release_height, mint_address)
+                Self::process_lock(
+                    program_id,
+                    accounts,
+                    seeds,
+                    amount,
+                    release_height,
+                    mint_address,
+                )
             }
-            VestingInstruction::Unlock {seeds} => {
+            VestingInstruction::Unlock { seeds } => {
                 msg!("Instruction: Unlock");
                 Self::process_unlock(program_id, accounts, seeds)
             }
-
         }
     }
 }
@@ -275,7 +276,7 @@ impl PrintProgramError for VestingError {
         E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitive,
     {
         match self {
-            VestingError::InvalidInstruction => msg!("Error: Invalid instruction!")
+            VestingError::InvalidInstruction => msg!("Error: Invalid instruction!"),
         }
     }
 }
@@ -285,9 +286,8 @@ mod tests {
     use super::*;
 
     // #[test]
-    fn test_lock(){
-
-        let mut seeds = [42u8;32];
+    fn test_lock() {
+        let mut seeds = [42u8; 32];
 
         let source_account = Pubkey::new_unique();
         let mut source_lamports = 42u64;
@@ -304,8 +304,7 @@ mod tests {
 
         // let transaction = Pubkey::create_program_address(&[&seeds], &program_id).unwrap();
 
-        let mut transaction_data = [0u8;STATE_SIZE];
-
+        let mut transaction_data = [0u8; STATE_SIZE];
 
         let accounts = vec![
             AccountInfo::new(
@@ -316,7 +315,7 @@ mod tests {
                 &mut [],
                 &owner,
                 true,
-                7000
+                7000,
             ),
             AccountInfo::new(
                 &transaction,
@@ -326,7 +325,7 @@ mod tests {
                 &mut transaction_data,
                 &owner,
                 true,
-                7000
+                7000,
             ),
             AccountInfo::new(
                 &source_account,
@@ -336,7 +335,7 @@ mod tests {
                 &mut [],
                 &owner,
                 false,
-                7000
+                7000,
             ),
             AccountInfo::new(
                 &destination_account,
@@ -346,8 +345,8 @@ mod tests {
                 &mut [],
                 &owner,
                 false,
-                7000
-            )
+                7000,
+            ),
         ];
         // Processor::process_instruction(
         //     &program_id,
