@@ -22,3 +22,5 @@ pub fn process_instruction(
     }
     Ok(())
 }
+
+solana_program::declare_id!("VestingbGKPFXCWuBvfkegQfZyiNwAJb9Ss623VQ5DA");
