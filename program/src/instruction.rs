@@ -8,49 +8,21 @@ use std::mem::size_of;
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum VestingInstruction {
-    /// Creates a new simple vesting contract (SVC)
-    ///
-    /// Accounts expected by this instruction:
-    ///
-    ///   * Single owner
-    ///   0. `[]` The vesting account.
-    ///   1. `[writable]` The vesting spl-token account
-    ///   2. `[signer]` The source spl-token account owner.
-    ///   3. `[writable]` The source spl-token account
-    ///   4. `[]` The destination spl-token account
-    Create {
+    Init {
         seeds: [u8; 32],
         amount: u64,
         release_height: u64,
         mint_address: Pubkey,
     },
-    /// Creates a new simple vesting contract (SVC) - can only be invoked by the program itself
-    ///
-    /// Accounts expected by this instruction:
-    ///
-    ///   * Single owner
-    ///   0. `[]` The vesting account.
-    ///   1. `[writable]` The vesting spl-token account
-    ///   2. `[signer]` The source spl-token account owner.
-    ///   3. `[writable]` The source spl-token account
-    ///   4. `[]` The destination spl-token account
-    // CreatePrivate {
-    //     seeds: [u8; 32],
-    //     amount: u64,
-    //     release_height: u64,
-    //     mint_address: Pubkey
-    // },
-
-    // /// Unlocks a simple vesting contract (SVC) - can only be invoked by the program itself
-    // ///
-    // /// Accounts expected by this instruction:
-    // ///
-    // ///   * Single owner
-    // ///   0. `[]` The vesting account.
-    // ///   1. `[writable]` The vesting spl-token account.
-    // ///   2. `[writable]` The destination spl-token account
-    // ///   3. `[]` The vesting account
-    Unlock { seeds: [u8; 32] },
+    Lock {
+        seeds: [u8; 32],
+        amount: u64,
+        release_height: u64,
+        mint_address: Pubkey,
+    },
+    Unlock {
+        seeds: [u8; 32],
+    },
 }
 
 impl VestingInstruction {
@@ -84,13 +56,18 @@ impl VestingInstruction {
                     .ok_or(InvalidInstruction)?;
                 // msg!("Parsed release_height");
                 match tag {
-                    0 => Self::Create {
+                    0 => Self::Init {
                         seeds,
                         amount,
                         release_height,
                         mint_address,
                     },
-                    // 1 => Self::CreatePrivate { seeds , amount, release_height, mint_address },
+                    1 => Self::Lock {
+                        seeds,
+                        amount,
+                        release_height,
+                        mint_address,
+                    },
                     _ => unreachable!(),
                 }
             }
@@ -108,7 +85,7 @@ impl VestingInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match self {
-            &Self::Create {
+            &Self::Init {
                 seeds,
                 amount,
                 release_height,
@@ -120,13 +97,18 @@ impl VestingInstruction {
                 buf.extend_from_slice(&release_height.to_le_bytes());
                 buf.extend_from_slice(&mint_address.to_bytes());
             }
-            // &Self::CreatePrivate { seeds, amount, release_height , mint_address} => {
-            //     buf.push(1);
-            //     buf.extend_from_slice(&seeds);
-            //     buf.extend_from_slice(&amount.to_le_bytes());
-            //     buf.extend_from_slice(&release_height.to_le_bytes());
-            //     buf.extend_from_slice(&mint_address.to_bytes());
-            // }
+            &Self::Lock {
+                seeds,
+                amount,
+                release_height,
+                mint_address,
+            } => {
+                buf.push(1);
+                buf.extend_from_slice(&seeds);
+                buf.extend_from_slice(&amount.to_le_bytes());
+                buf.extend_from_slice(&release_height.to_le_bytes());
+                buf.extend_from_slice(&mint_address.to_bytes());
+            }
             &Self::Unlock { seeds } => {
                 buf.push(2);
                 buf.extend_from_slice(&seeds);
@@ -143,13 +125,13 @@ mod test {
     #[test]
     fn test_instruction_packing() {
         let mint_address = Pubkey::new_unique();
-        let check = VestingInstruction::Create {
+        let check = VestingInstruction::Lock {
             seeds: [50u8; 32],
             amount: 42,
             release_height: 250,
             mint_address: mint_address.clone(),
         };
-        let mut expected = Vec::from([0]);
+        let mut expected = Vec::from([1]);
         let seeds = [50u8; 32];
         let data = [42, 0, 0, 0, 0, 0, 0, 0, 250, 0, 0, 0, 0, 0, 0, 0];
         expected.extend_from_slice(&seeds);

@@ -10,7 +10,6 @@ use solana_program_test::{processor, ProgramTest};
 use solana_sdk::{account::Account, signature::Signer, transaction::Transaction};
 use token_vesting::entrypoint::process_instruction;
 use token_vesting::instruction::VestingInstruction;
-use token_vesting::state::STATE_SIZE;
 
 #[tokio::test]
 async fn test_token_vesting() {
@@ -39,7 +38,7 @@ async fn test_token_vesting() {
         transaction_pubkey,
         Account {
             lamports: Rent::default().minimum_balance(40),
-            data: [0u8; STATE_SIZE]..Account::default(),
+            ..Account::default()
         },
     );
 
@@ -92,5 +91,3 @@ async fn test_token_vesting() {
 
     banks_client.process_transaction(transaction).await.unwrap();
 }
-
-fn initialize_token_account(owner: Pubkey, mint_address: Pubkey) {}
