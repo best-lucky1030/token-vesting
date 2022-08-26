@@ -3,8 +3,9 @@ use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     rent::Rent,
+    sysvar::clock
 };
-use solana_program_test::{processor, ProgramTest};
+use solana_program_test::{processor};
 use solana_sdk::{
     account::Account, signature::Keypair, signature::Signer, transaction::Transaction,
 };
@@ -111,6 +112,7 @@ async fn test_token_vesting() {
     //     AccountMeta::new(vesting_account_key, false),
     //     AccountMeta::new(vesting_token_account_key, false),
     //     AccountMeta::new(destination_token_account_key, false),
+    // AccountMeta::new(sysvar::clock::id(), false)
     // ];
 
     let instructions = [
