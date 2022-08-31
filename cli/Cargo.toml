@@ -12,4 +12,5 @@ solana-clap-utils = "1.11.7"
 solana-client = "1.11.7"
 solana-program = "1.11.7"
 solana-sdk = "1.11.7"
-token-vesting = { version = "0.1.0", path="../program", feature="no-entrypoint" }
+token-vesting =  { version = "0.1.0", path="../program", features=["no-entrypoint"] }
+spl-associated-token-account = {version = "1.0.2", features = ["no-entrypoint"]}

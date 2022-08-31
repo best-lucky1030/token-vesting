@@ -1,6 +1,4 @@
-use clap::{
-    crate_description, crate_name, crate_version, value_t, App, AppSettings, Arg, SubCommand,
-};
+use clap::{crate_description, crate_name, crate_version, create, unlock, value_t};
 use solana_clap_utils::{
     input_parsers::{keypair_of, lamports_of_sol, pubkey_of, value_of},
     input_validators::{is_amount, is_keypair, is_parsable, is_pubkey, is_url},
@@ -13,16 +11,18 @@ use solana_program::{
     system_program,
 };
 use solana_sdk::{signature::Keypair, signature::Signer, transaction::Transaction};
+use spl_associated_token_account::get_associated_token_address;
 use std::convert::TryInto;
-use token_vesting::instruction::VestingInstruction;
+use token_vesting::instruction::{create, unlock, VestingInstruction};
 
 // Lock the vesting contract
 fn command_create_svc(
     rpc_client: RpcClient,
     program_id: Pubkey,
     mut vesting_seed: [u8; 32],
-    source_pubkey: Keypair,
-    destination_pubkey: Pubkey,
+    source_token_owner: Keypair,
+    destination_token_pubkey: Pubkey,
+    mint_address: Pubkey,
     vesting_amount: u64,
 ) {
     // Find the non reversible public key for the vesting contract via the seed
@@ -30,30 +30,30 @@ fn command_create_svc(
     vesting_seed[31] = bump;
     msg!("Vesting account pubkey: {:?}", vesting_pubkey);
 
-    let init_accounts = vec![
-        AccountMeta::new(program_id, false),
-        AccountMeta::new(system_program::id(), false),
-        AccountMeta::new(vesting_pubkey, false),
-        AccountMeta::new(source_pubkey.pubkey(), false),
-        AccountMeta::new(destination_pubkey, false),
-    ];
+    let source_token_pubkey =
+        get_associated_token_address(&source_token_owner.pubkey(), &mint_address);
 
-    let init_instruction_data = VestingInstruction::Init {
-        seeds: vesting_seed.clone(),
-        amount: vesting_amount,
-        release_height: 0,
-        mint_address: Pubkey::new_unique(),
-    }
-    .pack();
-    msg!("Packed instruction data: {:?}", init_instruction_data);
+    let decimals = rpc_client
+        .get_token_account(&source_token_pubkey)
+        .unwrap()
+        .unwrap()
+        .token_amount
+        .decimals;
 
-    let instructions = [Instruction {
-        program_id: program_id,
-        accounts: init_accounts,
-        data: init_instruction_data,
-    }];
+    let create_instruction = create(
+        &program_id,
+        &vesting_pubkey,
+        &source_token_pubkey,
+        &destination_token_pubkey,
+        &mint_address,
+        vesting_amount,
+        0,
+        vesting_seed,
+    )
+    .unwrap();
 
-    let mut transaction = Transaction::new_with_payer(&instructions, Some(&source_pubkey.pubkey()));
+    let mut transaction =
+        Transaction::new_with_payer(&create_instruction, Some(&source_pubkey.pubkey()));
 
     let recent_blockhash = rpc_client.get_recent_blockhash().unwrap().0;
     transaction.sign(&[&source_pubkey], recent_blockhash);
@@ -67,6 +67,7 @@ fn command_unlock_svc(
     mut vesting_seed: [u8; 32],
     source_pubkey: Keypair,
     destination_pubkey: Pubkey,
+    mint_address: Pubkey,
     vesting_amount: u64,
 ) {
     // Find the non reversible public key for the vesting contract via the seed
@@ -74,26 +75,17 @@ fn command_unlock_svc(
     vesting_seed[31] = bump;
     msg!("Vesting account pubkey: {:?}", vesting_pubkey);
 
-    let unlock_accounts = vec![
-        AccountMeta::new(program_id, false),
-        AccountMeta::new(system_program::id(), false),
-        AccountMeta::new(vesting_pubkey, false),
-        AccountMeta::new(destination_pubkey, false),
-    ];
+    let unlock_instruction = unlock(
+        &program_id,
+        &vesting_pubkey,
+        &destination_pubkey,
+        &mint_address,
+        vesting_seed,
+    )
+    .unwrap();
 
-    let unlock_instruction_data = VestingInstruction::Unlock {
-        seeds: vesting_seed.clone(),
-    }
-    .pack();
-    msg!("Packed instruction data: {:?}", unlock_instruction_data);
-
-    let instructions = [Instruction {
-        program_id: program_id,
-        accounts: unlock_accounts,
-        data: unlock_instruction_data,
-    }];
-
-    let mut transaction = Transaction::new_with_payer(&instructions, Some(&source_pubkey.pubkey()));
+    let mut transaction =
+        Transaction::new_with_payer(&unlock_instruction, Some(&source_pubkey.pubkey()));
 
     let recent_blockhash = rpc_client.get_recent_blockhash().unwrap().0;
     transaction.sign(&[&source_pubkey], recent_blockhash);
