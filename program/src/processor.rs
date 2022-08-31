@@ -109,6 +109,7 @@ impl Processor {
         amount: u64,
         release_height: u64,
         mint_address: Pubkey,
+        destination_token_address: Pubkey,
     ) -> ProgramResult {
         let accounts_iter = &mut accounts.iter();
 
@@ -119,7 +120,6 @@ impl Processor {
         let vesting_token_account = next_account_info(accounts_iter)?;
         let source_token_account_owner = next_account_info(accounts_iter)?;
         let source_token_account = next_account_info(accounts_iter)?;
-        let destination_token_account = next_account_info(accounts_iter)?;
 
         let vesting_account_key = Pubkey::create_program_address(&[&seeds], program_id)?;
         if vesting_account_key != *vesting_account.key {
@@ -146,7 +146,7 @@ impl Processor {
         }
 
         let state = VestingParameters {
-            destination_address: destination_token_account.key.clone(),
+            destination_address: destination_token_address,
             release_height,
             mint_address: mint_address,
             amount,
@@ -323,6 +323,7 @@ impl Processor {
                 amount,
                 release_height,
                 mint_address,
+                destination_token_address,
             } => {
                 msg!("Instruction: Create");
                 Self::process_create(
@@ -332,6 +333,7 @@ impl Processor {
                     amount,
                     release_height,
                     mint_address,
+                    destination_token_address,
                 )
             }
             VestingInstruction::Unlock { seeds } => {
