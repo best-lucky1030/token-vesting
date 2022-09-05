@@ -8,7 +8,7 @@ use solana_program::{
     program_pack::Pack,
     pubkey::Pubkey,
     rent::Rent,
-    sysvar,
+    system_program, sysvar,
 };
 use solana_program_test::{processor, ProgramTest};
 use solana_sdk::{
@@ -22,8 +22,8 @@ use spl_token::{
     state::Mint,
 };
 use token_vesting::entrypoint::process_instruction;
-use token_vesting::instruction::{change_destination, create, unlock, VestingInstruction};
-use token_vesting::state::STATE_SIZE;
+use token_vesting::instruction::{change_destination, create, init, unlock, VestingInstruction};
+use token_vesting::state::TOTAL_SIZE;
 
 #[tokio::test]
 async fn test_token_vesting() {
@@ -52,25 +52,34 @@ async fn test_token_vesting() {
 
     // Add accounts
     program_test.add_account(
-        vesting_account_key,
-        Account {
-            lamports: Rent::default().minimum_balance(STATE_SIZE),
-            data: [0u8; STATE_SIZE].to_vec(),
-            owner: program_id,
-            ..Account::default()
-        },
-    );
-    program_test.add_account(
         source_account.pubkey(),
         Account {
-            lamports: 5,
+            lamports: 5000000,
             ..Account::default()
         },
     );
 
-    // Start the test network
+    // Start and process transactions on the test network
     let (mut banks_client, payer, recent_blockhash) = program_test.start().await;
 
+    // Initialize the vesting program account
+    let init_instruction = [init(
+        &system_program::id(),
+        &program_id,
+        &source_account.pubkey(),
+        &vesting_account_key,
+        seeds,
+    )
+    .unwrap()];
+    let mut init_transaction =
+        Transaction::new_with_payer(&init_instruction, Some(&payer.pubkey()));
+    init_transaction.partial_sign(&[&source_account, &payer], recent_blockhash);
+    banks_client
+        .process_transaction(init_transaction)
+        .await
+        .unwrap();
+
+    // Initialize the token accounts
     banks_client
         .process_transaction(mint_init_transaction(
             &payer,
@@ -91,7 +100,6 @@ async fn test_token_vesting() {
         ))
         .await
         .unwrap();
-
     banks_client
         .process_transaction(create_token_account(
             &payer,
@@ -102,7 +110,6 @@ async fn test_token_vesting() {
         ))
         .await
         .unwrap();
-
     banks_client
         .process_transaction(create_token_account(
             &payer,
@@ -113,7 +120,6 @@ async fn test_token_vesting() {
         ))
         .await
         .unwrap();
-
     banks_client
         .process_transaction(create_token_account(
             &payer,
@@ -125,6 +131,7 @@ async fn test_token_vesting() {
         .await
         .unwrap();
 
+    // Create and process the vesting transactions
     let setup_instructions = [mint_to(
         &spl_token::id(),
         &mint.pubkey(),
@@ -245,11 +252,6 @@ fn create_token_account(
             165,
             &spl_token::id(),
         ),
-        // create_associated_token_account(
-        //     &payer.pubkey(),
-        //     source_token_account,
-        //     &mint.pubkey()
-        // ),
         initialize_account(
             &spl_token::id(),
             &token_account.pubkey(),

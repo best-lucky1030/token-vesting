@@ -23,6 +23,14 @@ pub const SCHEDULE_SIZE: usize = 16;
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum VestingInstruction {
+    /// Initializes an empty program account for the token_vesting program
+    ///
+    /// Accounts expected by this instruction:
+    ///
+    ///   * Single owner
+    ///   0. `[]` The system program account
+    ///   1. `[writable]` The source account (fee payer)
+    Init { seeds: [u8; 32] },
     /// Creates a new simple vesting contract (SVC)
     ///
     /// Accounts expected by this instruction:
@@ -93,6 +101,13 @@ impl VestingInstruction {
                     .get(..32)
                     .and_then(|slice| slice.try_into().ok())
                     .unwrap();
+                Self::Init { seeds }
+            }
+            1 => {
+                let seeds: [u8; 32] = rest
+                    .get(..32)
+                    .and_then(|slice| slice.try_into().ok())
+                    .unwrap();
                 let amount = rest
                     .get(32..40)
                     .and_then(|slice| slice.try_into().ok())
@@ -125,7 +140,7 @@ impl VestingInstruction {
                     destination_token_address,
                 }
             }
-            1 => {
+            2 => {
                 let seeds: [u8; 32] = rest
                     .get(..32)
                     .and_then(|slice| slice.try_into().ok())
@@ -167,14 +182,14 @@ impl VestingInstruction {
                     schedules,
                 }
             }
-            2 => {
+            3 => {
                 let seeds: [u8; 32] = rest
                     .get(..32)
                     .and_then(|slice| slice.try_into().ok())
                     .unwrap();
                 Self::Unlock { seeds }
             }
-            3 => {
+            4 => {
                 let seeds: [u8; 32] = rest
                     .get(..32)
                     .and_then(|slice| slice.try_into().ok())
@@ -188,6 +203,10 @@ impl VestingInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match self {
+            &Self::Init { seeds } => {
+                buf.push(0);
+                buf.extend_from_slice(&seeds);
+            }
             &Self::Create {
                 seeds,
                 amount,
@@ -195,7 +214,7 @@ impl VestingInstruction {
                 mint_address,
                 destination_token_address,
             } => {
-                buf.push(0);
+                buf.push(1);
                 buf.extend_from_slice(&seeds);
                 buf.extend_from_slice(&amount.to_le_bytes());
                 buf.extend_from_slice(&release_height.to_le_bytes());
@@ -208,7 +227,7 @@ impl VestingInstruction {
                 destination_token_address,
                 schedules,
             } => {
-                buf.push(1);
+                buf.push(2);
                 buf.extend_from_slice(seeds);
                 buf.extend_from_slice(&mint_address.to_bytes());
                 buf.extend_from_slice(&destination_token_address.to_bytes());
@@ -218,16 +237,37 @@ impl VestingInstruction {
                 });
             }
             &Self::Unlock { seeds } => {
-                buf.push(2);
+                buf.push(3);
                 buf.extend_from_slice(&seeds);
             }
             &Self::ChangeDestination { seeds } => {
-                buf.push(3);
+                buf.push(4);
                 buf.extend_from_slice(&seeds);
             }
         };
         buf
     }
+}
+
+// Create a `Init` instruction
+pub fn init(
+    system_program_id: &Pubkey,
+    vesting_program_id: &Pubkey,
+    source_token_account_owner_key: &Pubkey,
+    vesting_program_account: &Pubkey,
+    seeds: [u8; 32],
+) -> Result<Instruction, ProgramError> {
+    let data = VestingInstruction::Init { seeds }.pack();
+    let accounts = vec![
+        AccountMeta::new_readonly(*system_program_id, false),
+        AccountMeta::new_readonly(*source_token_account_owner_key, false),
+        AccountMeta::new(*vesting_program_account, false)
+    ];
+    Ok(Instruction {
+        program_id: *vesting_program_id,
+        accounts,
+        data,
+    })
 }
 
 // Creates a `Create` instruction
@@ -328,7 +368,7 @@ mod test {
             mint_address: mint_address.clone(),
             destination_token_address,
         };
-        let mut expected = Vec::from([0]);
+        let mut expected = Vec::from([1]);
         let seeds = [50u8; 32];
         let data = [42, 0, 0, 0, 0, 0, 0, 0, 250, 0, 0, 0, 0, 0, 0, 0];
         expected.extend_from_slice(&seeds);
