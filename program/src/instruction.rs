@@ -14,8 +14,8 @@ use std::mem::size_of;
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schedule {
-    release_height: u64,
-    amount: u64,
+    pub release_height: u64,
+    pub amount: u64,
 }
 
 pub const SCHEDULE_SIZE: usize = 16;
@@ -155,7 +155,7 @@ impl VestingInstruction {
                     .and_then(|slice| slice.try_into().ok())
                     .map(Pubkey::new)
                     .ok_or(InvalidInstruction)?;
-                let number_of_schedules = rest.len() / SCHEDULE_SIZE;
+                let number_of_schedules = rest[96..].len() / SCHEDULE_SIZE;
                 let mut schedules: Vec<Schedule> = Vec::with_capacity(number_of_schedules);
                 let mut offset = 96;
                 for i in 0..number_of_schedules {
@@ -170,10 +170,10 @@ impl VestingInstruction {
                         .map(u64::from_le_bytes)
                         .ok_or(InvalidInstruction)?;
                     offset += SCHEDULE_SIZE;
-                    schedules[i] = Schedule {
+                    schedules.push(Schedule {
                         release_height,
                         amount,
-                    }
+                    })
                 }
                 Self::CreateSchedule {
                     seeds,
@@ -196,7 +196,10 @@ impl VestingInstruction {
                     .unwrap();
                 Self::ChangeDestination { seeds }
             }
-            _ => return Err(InvalidInstruction.into()),
+            _ => {
+                msg!("Unsupported tag");
+                return Err(InvalidInstruction.into());
+            }
         })
     }
 
@@ -231,10 +234,10 @@ impl VestingInstruction {
                 buf.extend_from_slice(seeds);
                 buf.extend_from_slice(&mint_address.to_bytes());
                 buf.extend_from_slice(&destination_token_address.to_bytes());
-                schedules.iter().map(|schedule| {
-                    buf.extend_from_slice(&schedule.release_height.to_le_bytes());
-                    buf.extend_from_slice(&schedule.amount.to_le_bytes());
-                });
+                for s in schedules.iter() {
+                    buf.extend_from_slice(&s.release_height.to_le_bytes());
+                    buf.extend_from_slice(&s.amount.to_le_bytes());
+                }
             }
             &Self::Unlock { seeds } => {
                 buf.push(3);
@@ -249,7 +252,7 @@ impl VestingInstruction {
     }
 }
 
-// Create a `Init` instruction
+// Creates a `Init` instruction
 pub fn init(
     system_program_id: &Pubkey,
     vesting_program_id: &Pubkey,
@@ -260,8 +263,8 @@ pub fn init(
     let data = VestingInstruction::Init { seeds }.pack();
     let accounts = vec![
         AccountMeta::new_readonly(*system_program_id, false),
-        AccountMeta::new_readonly(*source_token_account_owner_key, false),
-        AccountMeta::new(*vesting_program_account, false)
+        AccountMeta::new(*source_token_account_owner_key, true),
+        AccountMeta::new(*vesting_program_account, false),
     ];
     Ok(Instruction {
         program_id: *vesting_program_id,
@@ -290,6 +293,40 @@ pub fn create(
         release_height,
         seeds,
         destination_token_address: *destination_token_account_key,
+    }
+    .pack();
+    let accounts = vec![
+        AccountMeta::new_readonly(*token_program_id, false),
+        AccountMeta::new(*vesting_account_key, false),
+        AccountMeta::new(*vesting_token_account_key, false),
+        AccountMeta::new_readonly(*source_token_account_owner_key, true),
+        AccountMeta::new(*source_token_account_key, false),
+    ];
+    Ok(Instruction {
+        program_id: *vesting_program_id,
+        accounts,
+        data,
+    })
+}
+
+// Creates a `CreateSchedule` instruction
+pub fn create_schedule(
+    vesting_program_id: &Pubkey,
+    token_program_id: &Pubkey,
+    vesting_account_key: &Pubkey,
+    vesting_token_account_key: &Pubkey,
+    source_token_account_owner_key: &Pubkey,
+    source_token_account_key: &Pubkey,
+    destination_token_account_key: &Pubkey,
+    mint_address: &Pubkey,
+    schedules: Vec<Schedule>,
+    seeds: [u8; 32],
+) -> Result<Instruction, ProgramError> {
+    let data = VestingInstruction::CreateSchedule {
+        mint_address: *mint_address,
+        seeds,
+        destination_token_address: *destination_token_account_key,
+        schedules,
     }
     .pack();
     let accounts = vec![

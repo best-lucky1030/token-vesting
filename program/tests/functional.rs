@@ -21,9 +21,11 @@ use spl_token::{
     instruction::{initialize_account, initialize_mint, mint_to},
     state::Mint,
 };
-use token_vesting::entrypoint::process_instruction;
-use token_vesting::instruction::{change_destination, create, init, unlock, VestingInstruction};
+use token_vesting::instruction::{
+    change_destination, create, create_schedule, init, unlock, VestingInstruction,
+};
 use token_vesting::state::TOTAL_SIZE;
+use token_vesting::{entrypoint::process_instruction, instruction::Schedule};
 
 #[tokio::test]
 async fn test_token_vesting() {
@@ -142,8 +144,13 @@ async fn test_token_vesting() {
     )
     .unwrap()];
 
+    let schedules = vec![Schedule {
+        amount: 20,
+        release_height: 0,
+    }];
+
     let test_instructions = [
-        create(
+        create_schedule(
             &program_id,
             &spl_token::id(),
             &vesting_account_key,
@@ -152,8 +159,7 @@ async fn test_token_vesting() {
             &source_token_account.pubkey(),
             &destination_token_account.pubkey(),
             &mint.pubkey(),
-            20,
-            0,
+            schedules,
             seeds.clone(),
         )
         .unwrap(),
@@ -178,7 +184,6 @@ async fn test_token_vesting() {
         seeds.clone(),
     )
     .unwrap()];
-
     // Process transaction on test network
     let mut setup_transaction =
         Transaction::new_with_payer(&setup_instructions, Some(&payer.pubkey()));
