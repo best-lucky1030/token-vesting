@@ -254,12 +254,14 @@ pub fn init(
     system_program_id: &Pubkey,
     vesting_program_id: &Pubkey,
     source_token_account_owner_key: &Pubkey,
+    vesting_program_account: &Pubkey,
     seeds: [u8; 32],
 ) -> Result<Instruction, ProgramError> {
     let data = VestingInstruction::Init { seeds }.pack();
     let accounts = vec![
         AccountMeta::new_readonly(*system_program_id, false),
         AccountMeta::new_readonly(*source_token_account_owner_key, false),
+        AccountMeta::new(*vesting_program_account, false)
     ];
     Ok(Instruction {
         program_id: *vesting_program_id,
