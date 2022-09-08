@@ -1,30 +1,17 @@
 #![cfg(feature = "test-bpf")]
 use std::str::FromStr;
 
-use solana_program::{
-    hash::Hash,
-    instruction::{AccountMeta, Instruction},
-    program_option::COption,
-    program_pack::Pack,
-    pubkey::Pubkey,
-    rent::Rent,
-    system_program, sysvar,
-};
+use solana_program::{hash::Hash, pubkey::Pubkey, rent::Rent, system_program, sysvar};
 use solana_program_test::{processor, ProgramTest};
 use solana_sdk::{
     account::Account, signature::Keypair, signature::Signer, system_instruction,
     transaction::Transaction,
 };
-use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
 use spl_token::{
     self,
     instruction::{initialize_account, initialize_mint, mint_to},
-    state::Mint,
 };
-use token_vesting::instruction::{
-    change_destination, create, create_schedule, init, unlock, VestingInstruction,
-};
-use token_vesting::state::TOTAL_SIZE;
+use token_vesting::instruction::{change_destination, create, init, unlock};
 use token_vesting::{entrypoint::process_instruction, instruction::Schedule};
 
 #[tokio::test]
@@ -71,6 +58,7 @@ async fn test_token_vesting() {
         &source_account.pubkey(),
         &vesting_account_key,
         seeds,
+        1,
     )
     .unwrap()];
     let mut init_transaction =
@@ -150,7 +138,7 @@ async fn test_token_vesting() {
     }];
 
     let test_instructions = [
-        create_schedule(
+        create(
             &program_id,
             &spl_token::id(),
             &vesting_account_key,
