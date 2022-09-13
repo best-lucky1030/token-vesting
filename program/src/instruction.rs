@@ -138,19 +138,15 @@ impl VestingInstruction {
                     schedules,
                 }
             }
-            2 => {
+            2 | 3 => {
                 let seeds: [u8; 32] = rest
                     .get(..32)
                     .and_then(|slice| slice.try_into().ok())
                     .unwrap();
-                Self::Unlock { seeds }
-            }
-            3 => {
-                let seeds: [u8; 32] = rest
-                    .get(..32)
-                    .and_then(|slice| slice.try_into().ok())
-                    .unwrap();
-                Self::ChangeDestination { seeds }
+                match tag {
+                    2 => Self::Unlock { seeds },
+                    _ => Self::ChangeDestination { seeds },
+                }
             }
             _ => {
                 msg!("Unsupported tag");
@@ -313,7 +309,8 @@ mod test {
     fn test_instruction_packing() {
         let mint_address = Pubkey::new_unique();
         let destination_token_address = Pubkey::new_unique();
-        let check = VestingInstruction::Create {
+
+        let original_create = VestingInstruction::Create {
             seeds: [50u8; 32],
             schedules: vec![Schedule {
                 amount: 42,
@@ -322,16 +319,29 @@ mod test {
             mint_address: mint_address.clone(),
             destination_token_address,
         };
-        let mut expected = Vec::from([1]);
-        let seeds = [50u8; 32];
-        let data = [250, 0, 0, 0, 0, 0, 0, 0, 42, 0, 0, 0, 0, 0, 0, 0];
-        expected.extend_from_slice(&seeds);
-        expected.extend_from_slice(&mint_address.to_bytes());
-        expected.extend_from_slice(&destination_token_address.to_bytes());
-        expected.extend_from_slice(&data);
-        let packed = check.pack();
-        assert_eq!(expected, packed);
-        let unpacked = VestingInstruction::unpack(&packed).unwrap();
-        assert_eq!(check, unpacked);
+        let packed_create = original_create.pack();
+        let unpacked_create = VestingInstruction::unpack(&packed_create).unwrap();
+        assert_eq!(original_create, unpacked_create);
+
+        let original_unlock = VestingInstruction::Unlock { seeds: [50u8; 32] };
+        assert_eq!(
+            original_unlock,
+            VestingInstruction::unpack(&original_unlock.pack()).unwrap()
+        );
+
+        let original_init = VestingInstruction::Init {
+            number_of_schedules: 42,
+            seeds: [50u8; 32],
+        };
+        assert_eq!(
+            original_init,
+            VestingInstruction::unpack(&original_init.pack()).unwrap()
+        );
+
+        let original_change = VestingInstruction::ChangeDestination { seeds: [50u8; 32] };
+        assert_eq!(
+            original_change,
+            VestingInstruction::unpack(&original_change.pack()).unwrap()
+        );
     }
 }
