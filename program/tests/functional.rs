@@ -1,29 +1,18 @@
 #![cfg(feature = "test-bpf")]
 use std::str::FromStr;
 
-use solana_program::{
-    hash::Hash,
-    instruction::{AccountMeta, Instruction},
-    program_option::COption,
-    program_pack::Pack,
-    pubkey::Pubkey,
-    rent::Rent,
-    system_program, sysvar,
-};
+use solana_program::{hash::Hash, pubkey::Pubkey, rent::Rent, system_program, sysvar};
 use solana_program_test::{processor, ProgramTest};
 use solana_sdk::{
     account::Account, signature::Keypair, signature::Signer, system_instruction,
     transaction::Transaction,
 };
-use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
 use spl_token::{
     self,
     instruction::{initialize_account, initialize_mint, mint_to},
-    state::Mint,
 };
-use token_vesting::entrypoint::process_instruction;
-use token_vesting::instruction::{change_destination, create, init, unlock, VestingInstruction};
-use token_vesting::state::TOTAL_SIZE;
+use token_vesting::instruction::{change_destination, create, init, unlock};
+use token_vesting::{entrypoint::process_instruction, instruction::Schedule};
 
 #[tokio::test]
 async fn test_token_vesting() {
@@ -69,6 +58,7 @@ async fn test_token_vesting() {
         &source_account.pubkey(),
         &vesting_account_key,
         seeds,
+        1,
     )
     .unwrap()];
     let mut init_transaction =
@@ -142,6 +132,11 @@ async fn test_token_vesting() {
     )
     .unwrap()];
 
+    let schedules = vec![Schedule {
+        amount: 20,
+        release_height: 0,
+    }];
+
     let test_instructions = [
         create(
             &program_id,
@@ -152,8 +147,7 @@ async fn test_token_vesting() {
             &source_token_account.pubkey(),
             &destination_token_account.pubkey(),
             &mint.pubkey(),
-            20,
-            0,
+            schedules,
             seeds.clone(),
         )
         .unwrap(),
@@ -178,7 +172,6 @@ async fn test_token_vesting() {
         seeds.clone(),
     )
     .unwrap()];
-
     // Process transaction on test network
     let mut setup_transaction =
         Transaction::new_with_payer(&setup_instructions, Some(&payer.pubkey()));
