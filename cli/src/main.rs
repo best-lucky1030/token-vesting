@@ -2,31 +2,18 @@ use clap::{
     crate_description, crate_name, crate_version, value_t, App, AppSettings, Arg, SubCommand,
 };
 use solana_clap_utils::{
-    input_parsers::{keypair_of, lamports_of_sol, pubkey_of, value_of},
-    input_validators::{is_amount, is_keypair, is_parsable, is_pubkey, is_url},
+    input_parsers::{keypair_of, pubkey_of, value_of, values_of},
+    input_validators::{is_amount, is_keypair, is_pubkey, is_slot, is_url},
 };
 use solana_client::rpc_client::RpcClient;
-use solana_program::{
-    instruction::{AccountMeta, Instruction},
-    msg,
-    program_pack::Pack,
-    pubkey::Pubkey,
-    rent::Rent,
-    system_program, sysvar,
-};
-use solana_sdk::{
-    self,
-    signature::Signer,
-    signature::{keypair_from_seed, Keypair},
-    system_instruction,
-    transaction::Transaction,
-};
+use solana_program::{msg, program_pack::Pack, pubkey::Pubkey, system_program, sysvar};
+use solana_sdk::{self, signature::Keypair, signature::Signer, transaction::Transaction};
 use spl_associated_token_account::{create_associated_token_account, get_associated_token_address};
 use spl_token;
 use std::convert::TryInto;
 use token_vesting::{
-    instruction::{change_destination, create, init, unlock, VestingInstruction},
-    state::VestingParameters,
+    instruction::{change_destination, create, init, unlock, Schedule},
+    state::{unpack_schedules, VestingScheduleHeader},
 };
 
 // Lock the vesting contract
@@ -39,7 +26,7 @@ fn command_create_svc(
     possible_source_token_pubkey: Option<Pubkey>,
     destination_token_pubkey: Pubkey,
     mint_address: Pubkey,
-    vesting_amount: u64,
+    schedules: Vec<Schedule>,
 ) {
     // If no source token account was given, use the associated source account
     let source_token_pubkey = match possible_source_token_pubkey {
@@ -63,6 +50,7 @@ fn command_create_svc(
             &payer.pubkey(),
             &vesting_pubkey,
             vesting_seed,
+            schedules.len() as u64,
         )
         .unwrap(),
         create_associated_token_account(
@@ -79,8 +67,7 @@ fn command_create_svc(
             &source_token_pubkey,
             &destination_token_pubkey,
             &mint_address,
-            vesting_amount,
-            0,
+            schedules,
             vesting_seed,
         )
         .unwrap(),
@@ -109,8 +96,9 @@ fn command_unlock_svc(
     let vesting_token_pubkey = get_associated_token_address(&vesting_pubkey, &mint_address);
 
     let packed_state = rpc_client.get_account_data(&vesting_pubkey).unwrap();
-    let state = VestingParameters::unpack(&packed_state[..]).unwrap();
-    let destination_token_pubkey = state.destination_address;
+    let header_state =
+        VestingScheduleHeader::unpack(&packed_state[..VestingScheduleHeader::LEN]).unwrap();
+    let destination_token_pubkey = header_state.destination_address;
 
     let unlock_instruction = unlock(
         &program_id,
@@ -145,8 +133,9 @@ fn command_change_destination(
     msg!("Vesting account pubkey: {:?}", &vesting_pubkey);
 
     let packed_state = rpc_client.get_account_data(&vesting_pubkey).unwrap();
-    let state = VestingParameters::unpack(&packed_state[..]).unwrap();
-    let destination_token_pubkey = state.destination_address;
+    let state_header =
+        VestingScheduleHeader::unpack(&packed_state[..VestingScheduleHeader::LEN]).unwrap();
+    let destination_token_pubkey = state_header.destination_address;
 
     let unlock_instruction = change_destination(
         &program_id,
@@ -169,6 +158,38 @@ fn command_change_destination(
     rpc_client.send_transaction(&transaction).unwrap();
 }
 
+fn command_info(
+    rpc_client: RpcClient,
+    rpc_url: String,
+    program_id: Pubkey,
+    mut vesting_seed: [u8; 32],
+) {
+    msg!("\n---------------VESTING--CONTRACT--INFO-----------------\n");
+    msg!("RPC URL: {:?}", &rpc_url);
+    msg!("Program ID: {:?}", &program_id);
+
+    // Find the non reversible public key for the vesting contract via the seed
+    let (vesting_pubkey, bump) = Pubkey::find_program_address(&[&vesting_seed[..31]], &program_id);
+    vesting_seed[31] = bump;
+    msg!("Corrected Vesting Seed: {:?}", &vesting_seed);
+    msg!("Vesting account pubkey: {:?}", &vesting_pubkey);
+
+    let packed_state = rpc_client.get_account_data(&vesting_pubkey).unwrap();
+    let state_header =
+        VestingScheduleHeader::unpack(&packed_state[..VestingScheduleHeader::LEN]).unwrap();
+    msg!("Initialized: {:?}", &state_header.is_initialized);
+    msg!("Destination: {:?}", &state_header.destination_address);
+    msg!("Mint Address: {:?}", &state_header.mint_address);
+
+    let schedules = unpack_schedules(&packed_state[VestingScheduleHeader::LEN..]).unwrap();
+
+    for i in 0..schedules.len() {
+        msg!("\nSCHEDULE {:?}", i);
+        msg!("Release Height: {:?}", &schedules[i].release_height);
+        msg!("Amount: {:?}", &schedules[i].amount);
+    }
+}
+
 fn main() {
     let matches = App::new(crate_name!())
         .about(crate_description!())
@@ -188,6 +209,7 @@ fn main() {
                 .value_name("URL")
                 .validator(is_url)
                 .takes_value(true)
+                .global(true)
                 .help("Specify the url of the rpc client (solana network)."),
         )
         .arg(
@@ -216,21 +238,9 @@ fn main() {
                 .takes_value(true)
                 .help("Specify the seed for the vesting contract."),
         )
-        .arg(
-            Arg::with_name("payer")
-                .long("payer")
-                .value_name("KEYPAIR")
-                .validator(is_keypair)
-                .takes_value(true)
-                .help(
-                    "Specify the transaction fee payer account address. \
-                    This may be a keypair file, the ASK keyword. \
-                    Defaults to the client keypair.",
-                ),
-        )
         .subcommand(
             SubCommand::with_name("create")
-                .about("Create a new simple vesting contract")
+                .about("Create a new vesting contract with an optionnal release schedule")
                 .arg(
                     Arg::with_name("source")
                         .long("source")
@@ -276,21 +286,70 @@ fn main() {
                         ),
                 )
                 .arg(
-                    Arg::with_name("amount")
-                        .long("amount")
+                    Arg::with_name("amounts")
+                        .long("amounts")
                         .value_name("AMOUNT")
                         .validator(is_amount)
                         .takes_value(true)
+                        .multiple(true)
+                        .value_terminator(";")
                         .help(
-                            "Amount in SOL to transfer via the vesting \
-                        contract.",
+                            "Amounts of tokens to transfer via the vesting \
+                        contract. Multiple inputs seperated by a comma are
+                        accepted for the creation of multiple schedules. The sequence of inputs \
+                        needs to end with a semi-colon.",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("release-heights")
+                        .long("release-heights")
+                        .value_name("SLOT")
+                        .validator(is_slot)
+                        .takes_value(true)
+                        .multiple(true)
+                        .value_terminator(";")
+                        .help(
+                            "Release height in network slots to decide when the contract is \
+                        unlockable. Multiple inputs seperated by a comma are
+                        accepted for the creation of multiple schedules. The sequence of inputs \
+                        needs to end with a semi-colon.",
+                        ),
+                )
+                .arg(
+                    Arg::with_name("payer")
+                        .long("payer")
+                        .value_name("KEYPAIR")
+                        .validator(is_keypair)
+                        .takes_value(true)
+                        .help(
+                            "Specify the transaction fee payer account address. \
+                        This may be a keypair file, the ASK keyword. \
+                        Defaults to the client keypair.",
                         ),
                 ),
         )
-        .subcommand(SubCommand::with_name("unlock").about("Unlock a simple vesting contract"))
+        .subcommand(
+            SubCommand::with_name("unlock")
+                .about(
+                    "Unlock a vesting contract. This will only release \
+        the schedules that have reached maturity.",
+                )
+                .arg(
+                    Arg::with_name("payer")
+                        .long("payer")
+                        .value_name("KEYPAIR")
+                        .validator(is_keypair)
+                        .takes_value(true)
+                        .help(
+                            "Specify the transaction fee payer account address. \
+                        This may be a keypair file, the ASK keyword. \
+                        Defaults to the client keypair.",
+                        ),
+                ),
+        )
         .subcommand(
             SubCommand::with_name("change-destination")
-                .about("Change the destination a simple vesting contract")
+                .about("Change the destination of a vesting contract")
                 .arg(
                     Arg::with_name("current_destination_owner")
                         .long("current_destination_owner")
@@ -326,12 +385,26 @@ fn main() {
                         If specified, this address will be used as a destination, \
                         and overwrite the associated token account.",
                         ),
+                )
+                .arg(
+                    Arg::with_name("payer")
+                        .long("payer")
+                        .value_name("KEYPAIR")
+                        .validator(is_keypair)
+                        .takes_value(true)
+                        .help(
+                            "Specify the transaction fee payer account address. \
+                        This may be a keypair file, the ASK keyword. \
+                        Defaults to the client keypair.",
+                        ),
                 ),
+        )
+        .subcommand(
+            SubCommand::with_name("info").about("Print information about a vesting contract"),
         )
         .get_matches();
 
     let rpc_url = value_t!(matches, "rpc_url", String).unwrap();
-    msg!("RPC URL: {:?}", &rpc_url);
     let rpc_client = RpcClient::new(rpc_url);
 
     let program_id = pubkey_of(&matches, "program_id").unwrap();
@@ -339,11 +412,6 @@ fn main() {
         .try_into()
         .unwrap();
     let mint_address = pubkey_of(&matches, "mint_address").unwrap();
-    let payer_keypair = keypair_of(&matches, "payer").unwrap();
-    msg!("Program ID: {:?}", &program_id);
-    msg!("Vesting Seed: {:?}", &vesting_seed);
-    msg!("Mint: {:?}", &mint_address);
-    msg!("Payer ID: {:?}", &payer_keypair.pubkey());
     let _ = match matches.subcommand() {
         ("create", Some(arg_matches)) => {
             let source_keypair = keypair_of(arg_matches, "source").unwrap();
@@ -355,11 +423,23 @@ fn main() {
                 ),
                 Some(destination_token_pubkey) => destination_token_pubkey,
             };
-            let vesting_amount = value_of(arg_matches, "amount").unwrap();
+            let payer_keypair = keypair_of(arg_matches, "payer").unwrap();
 
-            msg!("Source Pubkey: {:?}", &source_keypair.pubkey());
-            msg!("Destination Pubkey: {:?}", &destination_pubkey);
-            msg!("Vesting Amount: {:?}", &vesting_amount);
+            // Parsing schedules
+            let schedule_amounts: Vec<u64> = values_of(arg_matches, "amounts").unwrap();
+            let schedule_heights: Vec<u64> = values_of(arg_matches, "release-heights").unwrap();
+            if schedule_amounts.len() != schedule_heights.len() {
+                eprintln!("error: Number of amounts given is not equal to number of release heigts given.");
+                std::process::exit(1);
+            }
+            let mut schedules: Vec<Schedule> = Vec::with_capacity(schedule_amounts.len());
+            for (&a, &h) in schedule_amounts.iter().zip(schedule_heights.iter()) {
+                schedules.push(Schedule {
+                    release_height: h,
+                    amount: a,
+                });
+            }
+
             command_create_svc(
                 rpc_client,
                 program_id,
@@ -369,16 +449,19 @@ fn main() {
                 source_token_pubkey,
                 destination_pubkey,
                 mint_address,
-                vesting_amount,
+                schedules,
             )
         }
-        ("unlock", _) => command_unlock_svc(
-            rpc_client,
-            program_id,
-            vesting_seed,
-            mint_address,
-            payer_keypair,
-        ),
+        ("unlock", Some(arg_matches)) => {
+            let payer_keypair = keypair_of(arg_matches, "payer").unwrap();
+            command_unlock_svc(
+                rpc_client,
+                program_id,
+                vesting_seed,
+                mint_address,
+                payer_keypair,
+            )
+        }
         ("change-destination", Some(arg_matches)) => {
             let destination_account_owner =
                 keypair_of(arg_matches, "current_destination_owner").unwrap();
@@ -390,6 +473,7 @@ fn main() {
                     ),
                     Some(new_destination_token_account) => new_destination_token_account,
                 };
+            let payer_keypair = keypair_of(arg_matches, "payer").unwrap();
             command_change_destination(
                 rpc_client,
                 program_id,
@@ -398,6 +482,10 @@ fn main() {
                 vesting_seed,
                 payer_keypair,
             )
+        }
+        ("info", Some(arg_matches)) => {
+            let rpcurl = value_of(arg_matches, "rpc_url").unwrap();
+            command_info(rpc_client, rpcurl, program_id, vesting_seed)
         }
         _ => unreachable!(),
     };

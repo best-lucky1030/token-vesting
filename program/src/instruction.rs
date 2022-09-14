@@ -28,7 +28,7 @@ pub enum VestingInstruction {
     ///
     ///   * Single owner
     ///   0. `[]` The system program account
-    ///   1. `[writable]` The source account (fee payer)
+    ///   1. `[signer]` The fee payer account
     Init {
         seeds: [u8; 32],
         number_of_schedules: u64,
@@ -198,7 +198,7 @@ impl VestingInstruction {
 pub fn init(
     system_program_id: &Pubkey,
     vesting_program_id: &Pubkey,
-    source_token_account_owner_key: &Pubkey,
+    payer_key: &Pubkey,
     vesting_program_account: &Pubkey,
     seeds: [u8; 32],
     number_of_schedules: u64,
@@ -210,7 +210,7 @@ pub fn init(
     .pack();
     let accounts = vec![
         AccountMeta::new_readonly(*system_program_id, false),
-        AccountMeta::new(*source_token_account_owner_key, true),
+        AccountMeta::new(*payer_key, true),
         AccountMeta::new(*vesting_program_account, false),
     ];
     Ok(Instruction {
