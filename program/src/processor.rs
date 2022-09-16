@@ -180,14 +180,12 @@ impl Processor {
         let packed_state = &vesting_account.data;
         let header_state =
             VestingScheduleHeader::unpack(&packed_state.borrow()[..VestingScheduleHeader::LEN])?;
-        msg!("Unpacked header");
         if header_state.destination_address != *destination_token_account.key {
             msg!("Contract destination account does not matched provided account");
             return Err(ProgramError::InvalidArgument);
         }
 
         let vesting_token_account_data = Account::unpack(&vesting_token_account.data.borrow())?;
-        msg!("Unpacked account");
 
         if vesting_token_account_data.owner != vesting_account_key {
             msg!("The vesting token account should be owned by the vesting account.");
@@ -198,7 +196,6 @@ impl Processor {
         let clock = Clock::from_account_info(&clock_sysvar_account)?;
         let mut total_amount_to_transfer = 0;
         let mut schedules = unpack_schedules(&packed_state.borrow()[VestingScheduleHeader::LEN..])?;
-        msg!("Unpacked schedules");
 
         for s in schedules.iter_mut() {
             if clock.slot >= s.release_height {
@@ -228,7 +225,7 @@ impl Processor {
             ],
             &[&[&seeds]],
         )?;
-        // This makes the simple unlock safe with complex scheduling contracts
+        // Reset released amounts to 0. This makes the simple unlock safe with complex scheduling contracts
         pack_schedules_into_slice(
             schedules,
             &mut packed_state.borrow_mut()[VestingScheduleHeader::LEN..],
