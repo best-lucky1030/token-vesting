@@ -34,7 +34,7 @@ impl Processor {
         let accounts_iter = &mut accounts.iter();
 
         let system_program_account = next_account_info(accounts_iter)?;
-        let source_token_account_owner = next_account_info(accounts_iter)?;
+        let payer = next_account_info(accounts_iter)?;
         let vesting_account = next_account_info(accounts_iter)?;
 
         // Find the non reversible public key for the vesting contract via the seed
@@ -47,7 +47,7 @@ impl Processor {
         let state_size = (schedules as usize) * VestingSchedule::LEN + VestingScheduleHeader::LEN;
 
         let init_vesting_account = create_account(
-            &source_token_account_owner.key,
+            &payer.key,
             &vesting_account_key,
             Rent::default().minimum_balance(state_size),
             state_size as u64,
@@ -58,7 +58,7 @@ impl Processor {
             &init_vesting_account,
             &[
                 system_program_account.clone(),
-                source_token_account_owner.clone(),
+                payer.clone(),
                 vesting_account.clone(),
             ],
             &[&[&seeds]],
@@ -180,25 +180,22 @@ impl Processor {
         let packed_state = &vesting_account.data;
         let header_state =
             VestingScheduleHeader::unpack(&packed_state.borrow()[..VestingScheduleHeader::LEN])?;
-        msg!("Unpacked header");
         if header_state.destination_address != *destination_token_account.key {
             msg!("Contract destination account does not matched provided account");
             return Err(ProgramError::InvalidArgument);
         }
 
         let vesting_token_account_data = Account::unpack(&vesting_token_account.data.borrow())?;
-        msg!("Unpacked account");
 
         if vesting_token_account_data.owner != vesting_account_key {
             msg!("The vesting token account should be owned by the vesting account.");
             return Err(ProgramError::InvalidArgument);
         }
 
-        // Check that sufficient slots have passed to unlock
+        // Unlock the schedules that have reached maturity
         let clock = Clock::from_account_info(&clock_sysvar_account)?;
         let mut total_amount_to_transfer = 0;
         let mut schedules = unpack_schedules(&packed_state.borrow()[VestingScheduleHeader::LEN..])?;
-        msg!("Unpacked schedules");
 
         for s in schedules.iter_mut() {
             if clock.slot >= s.release_height {
@@ -228,7 +225,7 @@ impl Processor {
             ],
             &[&[&seeds]],
         )?;
-        // This makes the simple unlock safe with complex scheduling contracts
+        // Reset released amounts to 0. This makes the simple unlock safe with complex scheduling contracts
         pack_schedules_into_slice(
             schedules,
             &mut packed_state.borrow_mut()[VestingScheduleHeader::LEN..],
@@ -243,7 +240,7 @@ impl Processor {
     ) -> ProgramResult {
         let accounts_iter = &mut accounts.iter();
         let vesting_account = next_account_info(accounts_iter)?;
-        let destination_token_info = next_account_info(accounts_iter)?;
+        let destination_token_account = next_account_info(accounts_iter)?;
         let destination_token_account_owner = next_account_info(accounts_iter)?;
         let new_destination_token_account = next_account_info(accounts_iter)?;
 
@@ -256,7 +253,7 @@ impl Processor {
             msg!("Invalid vesting account key");
             return Err(ProgramError::InvalidArgument);
         }
-        if state.destination_address != *destination_token_info.key {
+        if state.destination_address != *destination_token_account.key {
             msg!("Contract destination account does not matched provided account");
             return Err(ProgramError::InvalidArgument);
         }
@@ -265,7 +262,7 @@ impl Processor {
             return Err(ProgramError::InvalidArgument);
         }
 
-        let destination_token_account = Account::unpack(&destination_token_info.data.borrow())?;
+        let destination_token_account = Account::unpack(&destination_token_account.data.borrow())?;
 
         if destination_token_account.owner != *destination_token_account_owner.key {
             msg!("The current destination token account isn't owned by the provided owner");
