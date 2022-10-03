@@ -33,7 +33,6 @@ async fn test_token_vesting() {
     let mut seeds = [42u8; 32];
     let (vesting_account_key, bump) = Pubkey::find_program_address(&[&seeds[..31]], &program_id);
     seeds[31] = bump;
-    // let vesting_token_account = get_associated_token_address(&vesting_account_key, &mint.pubkey());
     let vesting_token_account = Keypair::new();
 
     let mut program_test =
@@ -55,7 +54,7 @@ async fn test_token_vesting() {
     let init_instruction = [init(
         &system_program::id(),
         &program_id,
-        &source_account.pubkey(),
+        &payer.pubkey(),
         &vesting_account_key,
         seeds,
         1,
@@ -63,7 +62,7 @@ async fn test_token_vesting() {
     .unwrap()];
     let mut init_transaction =
         Transaction::new_with_payer(&init_instruction, Some(&payer.pubkey()));
-    init_transaction.partial_sign(&[&source_account, &payer], recent_blockhash);
+    init_transaction.partial_sign(&[&payer], recent_blockhash);
     banks_client
         .process_transaction(init_transaction)
         .await

@@ -10,6 +10,48 @@ use solana_program::{
 use std::convert::TryInto;
 use std::mem::size_of;
 
+#[cfg(feature = "fuzz")]
+use arbitrary::Arbitrary;
+
+#[cfg(feature = "fuzz")]
+impl Arbitrary for VestingInstruction {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'_>) -> arbitrary::Result<Self> {
+        let key_bytes: [u8; 32] = u.arbitrary()?;
+        let mint_address: Pubkey = Pubkey::new(&key_bytes);
+        let key_bytes: [u8; 32] = u.arbitrary()?;
+        let destination_token_address: Pubkey = Pubkey::new(&key_bytes);
+        let seeds: [u8; 32] = u.arbitrary()?;
+        let number_of_schedules = u.arbitrary()?;
+        let schedules = u.arbitrary()?;
+
+        let choice = u.choose(&[0, 1, 2, 3])?;
+        match choice {
+            0 => {
+                return Ok(Self::Init {
+                    seeds,
+                    number_of_schedules,
+                })
+            }
+            1 => {
+                return Ok(Self::Create {
+                    seeds,
+                    mint_address,
+                    destination_token_address,
+                    schedules,
+                })
+            }
+            2 => return Ok(Self::Unlock { seeds }),
+            3 => return Ok(Self::ChangeDestination { seeds }),
+            _ => (),
+        }
+        return Ok(Self::Init {
+            seeds,
+            number_of_schedules,
+        });
+    }
+}
+
+#[cfg_attr(feature = "fuzz", derive(Arbitrary))]
 #[repr(C)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schedule {
@@ -30,7 +72,9 @@ pub enum VestingInstruction {
     ///   0. `[]` The system program account
     ///   1. `[signer]` The fee payer account
     Init {
+        // The seed used to derive the vesting accounts address
         seeds: [u8; 32],
+        // The number of release schedules for this contract to hold
         number_of_schedules: u64,
     },
     /// Creates a new vesting schedule contract
@@ -197,7 +241,7 @@ pub fn init(
     system_program_id: &Pubkey,
     vesting_program_id: &Pubkey,
     payer_key: &Pubkey,
-    vesting_program_account: &Pubkey,
+    vesting_account: &Pubkey,
     seeds: [u8; 32],
     number_of_schedules: u64,
 ) -> Result<Instruction, ProgramError> {
@@ -209,7 +253,7 @@ pub fn init(
     let accounts = vec![
         AccountMeta::new_readonly(*system_program_id, false),
         AccountMeta::new(*payer_key, true),
-        AccountMeta::new(*vesting_program_account, false),
+        AccountMeta::new(*vesting_account, false),
     ];
     Ok(Instruction {
         program_id: *vesting_program_id,
